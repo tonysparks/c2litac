@@ -1,8 +1,8 @@
 //import "io";
-import "clib";
+import "std/libc";
+import "std/string_buffer";
+import "std/array";
 import "libclang";
-import "string_buffer";
-import "array";
 
 func translateMacro(cursor: CXCursor) : Macro {
     var name = StringBuffer{}
@@ -11,12 +11,12 @@ func translateMacro(cursor: CXCursor) : Macro {
     name.init()
     value.init()
 
-    var tokens: CXToken* = null
+    var tokens: *CXToken = null
     var numTokens: u32 = 0;
 
     var transUnit = clang_Cursor_getTranslationUnit(cursor);
     var srcRange  = clang_getCursorExtent(cursor);
-    
+
     clang_tokenize( transUnit, srcRange, &tokens, &numTokens );
     //defer clang_disposeTokens(transUnit, tokens, numTokens);
 
@@ -49,7 +49,7 @@ func translateMacro(cursor: CXCursor) : Macro {
             .value = value.cStr()
         }
     }
-    
+
     return Macro{null, null}
 }
 
@@ -64,37 +64,38 @@ const state: DeclState = DeclState{
 };
 
 struct FuncProto {
-    name: char const*
+    name: *const char
     type: CXType
 }
 
 struct Macro {
-    name: char const*
-    value: char const*
+    name: *const char
+    value: *const char
 }
 
 var typedefs : Array<FuncProto>;
 var macros : Array<Macro>;
 
-const typeMap = [][2]char const* {
-    [2]char const* {"int", "i32"},
-    [2]char const* {"unsigned int", "u32"},
-    [2]char const* {"unsigned char", "u8"},
-    [2]char const* {"short", "i16"},
-    [2]char const* {"unsigned short", "u16"},
-    [2]char const* {"long", "i64"},
-    [2]char const* {"unsigned long", "u64"},
-    [2]char const* {"float", "f32"},
-    [2]char const* {"double", "f64"},
-    [2]char const* {"long long", "i64"},    
-    [2]char const* {"unsigned", "u32"},
-    [2]char const* {"const char *", "char const*"},
-    [2]char const* {"const void *", "void const*"},    
-    [2]char const* {"const int *", "int const*"},    
-    [2]char const* {null, null}
+const typeMap = [][2]*const char {
+    [2]*const char {"int", "i32"},
+    [2]*const char {"unsigned int", "u32"},
+    [2]*const char {"unsigned char", "u8"},
+    [2]*const char {"short", "i16"},
+    [2]*const char {"unsigned short", "u16"},
+    [2]*const char {"long", "i64"},
+    [2]*const char {"unsigned long", "u64"},
+    [2]*const char {"float", "f32"},
+    [2]*const char {"double", "f64"},
+    [2]*const char {"long long", "i64"},
+    [2]*const char {"unsigned", "u32"},
+    [2]*const char {"const char *", "*const char"},
+    [2]*const char {"const void *", "*const void"},
+    [2]*const char {"const int *", "*const int"},
+    [2]*const char {"size_t", "usize"},
+    [2]*const char {null, null}
 };
 
-func skipWord(str: char const*) : char const* {
+func skipWord(str: *const char) : *const char {
     while(*str) {
         var c = *str
         if(c == ' ') {
@@ -102,13 +103,13 @@ func skipWord(str: char const*) : char const* {
             break;
         }
         str += 1
-    } 
+    }
     return str
 }
 
-func toLitaType(type: CXType) : char const* {
+func toLitaType(type: CXType) : *const char {
     /*var typeStr = clang_getTypedefName(type)
-    //if(typeStr.data == null) 
+    //if(typeStr.data == null)
     {
         //printf("** here\n")
     }*/
@@ -117,7 +118,7 @@ func toLitaType(type: CXType) : char const* {
 
     //printf("~~'%s'  \n", cType)
     //var cxStr = clang_getTypeKindSpelling(type.kind);
-    //printf("KindStr: %s\n", clang_getCString(cxStr))    
+    //printf("KindStr: %s\n", clang_getCString(cxStr))
 
     switch(type.kind) {
         case CXTypeKind.CXType_FunctionNoProto:
@@ -126,12 +127,12 @@ func toLitaType(type: CXType) : char const* {
             //printf("Here!!\n")
             break;
         }
-        case CXTypeKind.CXType_Elaborated: {   
-            //printf("Elaborated %s\n", cType)         
+        case CXTypeKind.CXType_Elaborated: {
+            //printf("Elaborated %s\n", cType)
             cType = skipWord(cType)
             break;
         }
-        case CXTypeKind.CXType_Pointer: {            
+        case CXTypeKind.CXType_Pointer: {
             var ptrType = clang_getPointeeType(type)
             var _typeStr = clang_getTypeSpelling(ptrType)
             var _cType = clang_getCString(_typeStr)
@@ -140,9 +141,9 @@ func toLitaType(type: CXType) : char const* {
             sb.init()
 
             if(clang_isConstQualifiedType(ptrType)) {
-                sb.append("%s const*", toLitaType(ptrType))
+                sb.append("*const %s", toLitaType(ptrType))
             }
-            else sb.append("%s*", toLitaType(ptrType))            
+            else sb.append("*%s", toLitaType(ptrType))
 
            // printf("*** '%s'\n", sb.cStr())
             return sb.cStr()
@@ -157,7 +158,7 @@ func toLitaType(type: CXType) : char const* {
         }
     }
 
-    if(clang_isConstQualifiedType(type)) {        
+    if(clang_isConstQualifiedType(type)) {
         cType = skipWord(cType)
     }
 
@@ -166,11 +167,11 @@ func toLitaType(type: CXType) : char const* {
 
 func visitCursor(c: CXCursor, parent: CXCursor, clientData: CXClientData) : CXChildVisitResult {
 
-    var cStr = clang_getCursorSpelling(c); 
+    var cStr = clang_getCursorSpelling(c);
     //defer clang_disposeString(cStr);
 
     var kind = clang_getCursorKind(c)
-    var kindStr =  clang_getCursorKindSpelling(kind); 
+    var kindStr =  clang_getCursorKindSpelling(kind);
     //defer clang_disposeString(kindStr);
 
     if (clang_Location_isFromMainFile(clang_getCursorLocation(c)) == 0) {
@@ -184,30 +185,30 @@ func visitCursor(c: CXCursor, parent: CXCursor, clientData: CXClientData) : CXCh
                 printf("}\n")
             }
 
-            printf("\n@foreign\npublic struct %s {\n", clang_getCString(cStr))      
-            state.isFirst = true;      
+            printf("\n@foreign\npublic struct %s {\n", clang_getCString(cStr))
+            state.isFirst = true;
             state.inType = true;
             break;
         }
-        
+
         case CXCursorKind.CXCursor_UnionDecl: {
             if(state.inType) {
                 printf("}\n")
             }
 
-            printf("\n@foreign\npublic union %s {\n", clang_getCString(cStr))      
-            state.isFirst = true;      
+            printf("\n@foreign\npublic union %s {\n", clang_getCString(cStr))
+            state.isFirst = true;
             state.inType = true;
             break;
         }
-        
+
         case CXCursorKind.CXCursor_EnumDecl: {
             if(state.inType) {
                 printf("}\n")
             }
 
-            printf("\n@foreign\npublic enum %s {\n", clang_getCString(cStr))      
-            state.isFirst = true;      
+            printf("\n@foreign\npublic enum %s {\n", clang_getCString(cStr))
+            state.isFirst = true;
             state.inType = true;
             break;
         }
@@ -217,14 +218,14 @@ func visitCursor(c: CXCursor, parent: CXCursor, clientData: CXClientData) : CXCh
             }
 
             printf("\n@foreign\npublic func %s(", clang_getCString(cStr))
-            
+
             var nArgs = clang_Cursor_getNumArguments(c)
             for(var i = 0; i < nArgs; i+=1) {
                 var c2 = clang_Cursor_getArgument(c, i)
-                                
-                var type = clang_getCursorType(c2)                
+
+                var type = clang_getCursorType(c2)
                 var litaStr = toLitaType(type);
-                
+
                 printf("p%d: %s", i, litaStr);
                 if(i < nArgs - 1)  {
                     printf(", ");
@@ -243,7 +244,7 @@ func visitCursor(c: CXCursor, parent: CXCursor, clientData: CXClientData) : CXCh
 
             var retType = clang_getCursorResultType(c)
             var litaRetStr = toLitaType(retType);
-            
+
             printf("%s;\n", litaRetStr);
             state.inType = false;
             break;
@@ -264,14 +265,14 @@ func visitCursor(c: CXCursor, parent: CXCursor, clientData: CXClientData) : CXCh
                     //printf("KindStr: %s\n", clang_getCString(cxStr))
 
                     if(type.kind == CXTypeKind.CXType_FunctionNoProto ||
-                       type.kind == CXTypeKind.CXType_FunctionProto) { 
+                       type.kind == CXTypeKind.CXType_FunctionProto) {
 
                         printf("@foreign public typedef func(")
                         var nArgs = clang_getNumArgTypes(type)
                         for(var i = 0; i < nArgs; i+=1) {
-                            var argType = clang_getArgType(type, i)                                            
+                            var argType = clang_getArgType(type, i)
                             var litaStr = toLitaType(argType);
-                            
+
                             printf("%s", litaStr);
                             if(i < nArgs - 1)  {
                                 printf(", ");
@@ -289,20 +290,20 @@ func visitCursor(c: CXCursor, parent: CXCursor, clientData: CXClientData) : CXCh
 
                         var retType = clang_getResultType(type)
                         var litaRetStr = toLitaType(retType);
-                        
-                        printf("%s as %s;\n", litaRetStr, name);                        
+
+                        printf("%s as %s;\n", litaRetStr, name);
                         state.inType = false;
                         break;
                     }
                 }
             }
-            
+
             printf("@foreign public typedef void as %s;\n", name)
             state.inType = false;
             break;
         }
 
-        case CXCursorKind.CXCursor_EnumConstantDecl: {            
+        case CXCursorKind.CXCursor_EnumConstantDecl: {
             if(!state.isFirst) {
                 printf("  ,")
             }
@@ -321,7 +322,7 @@ func visitCursor(c: CXCursor, parent: CXCursor, clientData: CXClientData) : CXCh
                 printf("   ")
             }
 
-            var type = clang_getCursorType(c)            
+            var type = clang_getCursorType(c)
             var litaStr = toLitaType(type);
 
             printf("%s: %s\n", clang_getCString(cStr), litaStr)
@@ -362,7 +363,7 @@ func visitCursor(c: CXCursor, parent: CXCursor, clientData: CXClientData) : CXCh
         }
         default: {
           // printf("Cursor '%s' of kind '%s'\n", clang_getCString(cStr), clang_getCString(kindStr));
-           return CXChildVisitResult.CXChildVisit_Continue;        
+           return CXChildVisitResult.CXChildVisit_Continue;
         }
     }
 
@@ -383,7 +384,7 @@ func printMacros() {
         for(var i = 0; i < typedefs.size(); i+=1) {
             var proto = typedefs.get(i)
             //printf("Proto: %s = %s\n", proto.name, )
-            
+
             var typeStr = toLitaType(proto.type)
             //printf("ProtoType: %s = %s\n", proto.name, typeStr)
             if(strcmp(proto.name, macro.value) == 0) {
@@ -400,7 +401,7 @@ func printMacros() {
 
 }
 
-const USAGE = 
+const USAGE =
 """
 c2litac [options] [header file]
 
@@ -408,14 +409,14 @@ Example:
 c2litac "C:/code/someheader.h"
 """
 
-func main(len: i32, args: char**) : i32 {
-    /*if(len < 2) {
+func main(len: i32, args: **char) : i32 {
+    if(len < 2) {
         printf("%s\n", USAGE);
         return 0;
-    }*/
+    }
 
-    
-    var filename = 
+
+    var filename =
     //"C:/Users/antho/Desktop/glad.h"
     //"C:/Users/antho/Desktop/glext.h"
     //"C:/Users/antho/Desktop/gl.h"
@@ -429,11 +430,11 @@ func main(len: i32, args: char**) : i32 {
     macros.init()
 
     var index = clang_createIndex(0, 0);
-    var unit = clang_parseTranslationUnit(index, filename, null, 0, null, 0, 
+    var unit = clang_parseTranslationUnit(index, filename, null, 0, null, 0,
                     CXTranslationUnit_Flags.CXTranslationUnit_SkipFunctionBodies |
                     CXTranslationUnit_Flags.CXTranslationUnit_DetailedPreprocessingRecord );
 //                    CXTranslationUnit_Flags.CXTranslationUnit_SingleFileParse);
-    
+
     if (!unit) {
         printf("Unable to parse translation unit. Quitting. \n");
         exit(-1);

@@ -1,0 +1,20 @@
+
+{
+    "name" : "c2litac",
+    "version" : "0.0.1",
+    "type" : "executable",
+    "repo" : "",
+
+    "build_command" : {
+        "default" : {
+            "default" : {
+                "cc" : "clang",
+                "cc_options" : "-std=c99 -fsanitize=undefined,address %input% -o %output% -D_CRT_SECURE_NO_WARNINGS",
+                "lita_options" : ""
+            }
+        }
+    },
+
+    "dependencies": [],
+
+}

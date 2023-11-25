@@ -1,22 +1,28 @@
+@compiler_option(
+  .os = "linux",
+  .options = "-I/usr/lib/llvm-14/include -L/usr/lib/llvm-14/lib -lclang"
+);
+
 @include("<clang-c/Index.h>");
 
 @raw("""
 typedef enum CXChildVisitResult CXChildVisitResult;
 typedef enum CXCursorKind CXCursorKind;
 typedef enum CXTypeKind CXTypeKind;
+typedef struct CXTranslationUnitImpl CXTranslationUnitImpl;
 """);
 
 @foreign
-public typedef void* as CXIndex;
+public typedef *void as CXIndex;
 
 @foreign
-public typedef void* as CXClientData;
+public typedef *void as CXClientData;
 
 @foreign
 public struct CXTranslationUnitImpl;
 
 @foreign
-public typedef CXTranslationUnitImpl* as CXTranslationUnit;
+public typedef *CXTranslationUnitImpl as CXTranslationUnit;
 
 @foreign
 public struct CXUnsavedFile {
@@ -25,12 +31,12 @@ public struct CXUnsavedFile {
    *
    * This file must already exist in the file system.
    */
-  Filename: char const*;
+  Filename: *const char;
 
   /**
    * A buffer containing the unsaved contents of this file.
    */
-  Contents: char const*;
+  Contents: *const char;
 
   /**
    * The length of the unsaved contents of this buffer.
@@ -42,8 +48,8 @@ public struct CXUnsavedFile {
 public struct CXCursor {
   kind: CXCursorKind;
   xdata: i32;
-  data: [3]void const*;
-} 
+  data: [3]*const char;
+}
 
 @foreign
 public typedef func(CXCursor, CXCursor, CXClientData) : CXChildVisitResult as CXCursorVisitor;
@@ -51,18 +57,18 @@ public typedef func(CXCursor, CXCursor, CXClientData) : CXChildVisitResult as CX
 
 @foreign
 public struct CXString {
-  data: void const*;
+  data: *const void;
   private_flags: u32;
-} 
+}
 
 @foreign
 public struct CXStringSet {
-  Strings: CXString*;
+  Strings: *CXString;
   Count: u32;
-} 
+}
 
 @foreign
-public func clang_getCString(string: CXString) : char const*;
+public func clang_getCString(string: CXString) : *const char;
 
 /**
  * Free the given string.
@@ -74,14 +80,14 @@ public func clang_disposeString(string: CXString) : void;
  * Free the given string set.
  */
  @foreign
-public func clang_disposeStringSet(set: CXStringSet*) : void;
+public func clang_disposeStringSet(set: *CXStringSet) : void;
 
 @foreign
 public func clang_parseTranslationUnit(CIdx : CXIndex,
-                           source_filename : char const*,
-                           command_line_args : char const**, //const char *const *,
+                           source_filename : *const char,
+                           command_line_args : **const char, //const char *const *,
                            num_command_line_args: i32,
-                           unsaved_files : CXUnsavedFile*,
+                           unsaved_files : *CXUnsavedFile,
                            num_unsaved_files : u32,
                            options: u32) :  CXTranslationUnit;
 
@@ -91,7 +97,7 @@ public func clang_createIndex(excludeDeclarationsFromPCH : i32,
                               displayDiagnostics : i32) : CXIndex;
 
 @foreign
-public func clang_disposeTranslationUnit(unit: CXTranslationUnit) : void;                       
+public func clang_disposeTranslationUnit(unit: CXTranslationUnit) : void;
 
 @foreign
 public func clang_disposeIndex(index: CXIndex) : void;
@@ -139,23 +145,23 @@ public func clang_getCursorExtent(c: CXCursor) : CXSourceRange;
 
 @foreign
 public func clang_tokenize(unit: CXTranslationUnit, range: CXSourceRange,
-                                   tokens: CXToken**, numTokens: u32*) : void;
+                                   tokens: **CXToken, numTokens: *u32) : void;
 
 @foreign
 public func clang_getTokenSpelling(unit: CXTranslationUnit, c: CXToken) : CXString;
 
 @foreign
-public func clang_getTokenKind(t: CXToken) : CXTokenKind;                   
+public func clang_getTokenKind(t: CXToken) : CXTokenKind;
 
 @foreign
 public func clang_disposeTokens(unit: CXTranslationUnit,
-                                        tokens: CXToken*, numTokens: u32) : void;
+                                        tokens: *CXToken, numTokens: u32) : void;
 
 @foreign
 public struct CXSourceLocation {
-  ptr_data: [2]void const*;
+  ptr_data: [2]*const void;
   int_data: u32;
-} 
+}
 
 @foreign
 public struct CXSourceRange {}
@@ -167,8 +173,8 @@ public struct CXToken {}
 @foreign
 public struct CXType {
   kind: CXTypeKind;
-  data: [2]void*;
-} 
+  data: [2]*void;
+}
 
 /**
  * Retrieve the type of a CXCursor (if any).

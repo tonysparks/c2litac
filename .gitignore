@@ -1,0 +1,4 @@
+litac_lsp.log
+bin/c2litac
+bin/*.c
+bin/*.lita
