@@ -1,15 +1,15 @@
 //import "io";
 import "std/libc";
-import "std/string_buffer";
+import "std/string";
+import "std/string/buffer";
+import "std/string/builder";
 import "std/array";
+import "std/map";
 import "libclang";
 
 func translateMacro(cursor: CXCursor) : Macro {
-    var name = StringBuffer{}
-    var value = StringBuffer{}
-
-    name.init()
-    value.init()
+    var name = StringBuilderInit(1024)
+    var value = StringBuilderInit(1024)
 
     var tokens: *CXToken = null
     var numTokens: u32 = 0;
@@ -73,8 +73,9 @@ struct Macro {
     value: *const char
 }
 
-var typedefs : Array<FuncProto>;
-var macros : Array<Macro>;
+var typedefs: Array<FuncProto>;
+var macros: Array<Macro>;
+var aggregateDefs: Map<*const char, *const char>
 
 const typeMap = [][2]*const char {
     [2]*const char {"int", "i32"},
@@ -91,20 +92,25 @@ const typeMap = [][2]*const char {
     [2]*const char {"const char *", "*const char"},
     [2]*const char {"const void *", "*const void"},
     [2]*const char {"const int *", "*const int"},
+    [2]*const char {"const unsigned char *", "*const u8"},
     [2]*const char {"size_t", "usize"},
     [2]*const char {null, null}
 };
 
 func skipWord(str: *const char) : *const char {
+    var original = str
+    var found = false
+
     while(*str) {
         var c = *str
         if(c == ' ') {
             str += 1
+            found = true
             break;
         }
         str += 1
     }
-    return str
+    return found ? str : original
 }
 
 func toLitaType(type: CXType) : *const char {
@@ -116,20 +122,56 @@ func toLitaType(type: CXType) : *const char {
     var typeStr = clang_getTypeSpelling(type)
     var cType = clang_getCString(typeStr)
 
-    //printf("~~'%s'  \n", cType)
+    //printf("~~'%s' -> %d \n", cType, type.kind)
     //var cxStr = clang_getTypeKindSpelling(type.kind);
     //printf("KindStr: %s\n", clang_getCString(cxStr))
 
     switch(type.kind) {
         case CXTypeKind.CXType_FunctionNoProto:
-        case CXTypeKind.CXType_FunctionProto:
+        case CXTypeKind.CXType_FunctionProto: {
+            var sb = StringBuilderInit(1024);
+            sb.append("func(")
+
+            var nArgs = clang_getNumArgTypes(type)
+            for(var i = 0; i < nArgs; i+=1) {
+                var argType = clang_getArgType(type, i)
+                var litaStr = toLitaType(argType);
+
+                sb.append("%s", litaStr);
+                if(i < nArgs - 1)  {
+                    sb.append(", ");
+                }
+            }
+
+            if(clang_isFunctionTypeVariadic(type) && nArgs > 0) {
+                if(nArgs > 0) {
+                    sb.append(", ")
+                }
+                sb.append("...");
+            }
+
+            sb.append(") : ");
+
+            var retType = clang_getResultType(type)
+            var litaRetStr = toLitaType(retType);
+
+            sb.append("%s", litaRetStr);
+
+            return sb.cStr()
+        }
+        case CXTypeKind.CXType_Complex: {
+            //printf("Record_Here!!\n")
+            break;
+        }
         case CXTypeKind.CXType_Typedef: {
             //printf("Here!!\n")
             break;
         }
         case CXTypeKind.CXType_Elaborated: {
             //printf("Elaborated %s\n", cType)
-            cType = skipWord(cType)
+            if(cType.toString().indexOf($" ") > -1) {
+                cType = skipWord(cType)
+            }
             break;
         }
         case CXTypeKind.CXType_Pointer: {
@@ -137,8 +179,7 @@ func toLitaType(type: CXType) : *const char {
             var _typeStr = clang_getTypeSpelling(ptrType)
             var _cType = clang_getCString(_typeStr)
 
-            var sb: StringBuffer;
-            sb.init()
+            var sb = StringBuilderInit(1024);
 
             if(clang_isConstQualifiedType(ptrType)) {
                 sb.append("*const %s", toLitaType(ptrType))
@@ -184,10 +225,16 @@ func visitCursor(c: CXCursor, parent: CXCursor, clientData: CXClientData) : CXCh
             if(state.inType) {
                 printf("}\n")
             }
+            var name = clang_getCString(cStr)
+            if (aggregateDefs.contains(name)) {
+                state.inType = false;
+                break
+            }
 
-            printf("\n@foreign\npublic struct %s {\n", clang_getCString(cStr))
+            printf("\n@foreign\npublic struct %s {\n", name)
             state.isFirst = true;
             state.inType = true;
+            aggregateDefs.put(name, name)
             break;
         }
 
@@ -195,10 +242,16 @@ func visitCursor(c: CXCursor, parent: CXCursor, clientData: CXClientData) : CXCh
             if(state.inType) {
                 printf("}\n")
             }
+            var name = clang_getCString(cStr)
+            if (aggregateDefs.contains(name)) {
+                state.inType = false;
+                break
+            }
 
-            printf("\n@foreign\npublic union %s {\n", clang_getCString(cStr))
+            printf("\n@foreign\npublic union %s {\n", name)
             state.isFirst = true;
             state.inType = true;
+            aggregateDefs.put(name, name)
             break;
         }
 
@@ -257,6 +310,11 @@ func visitCursor(c: CXCursor, parent: CXCursor, clientData: CXClientData) : CXCh
             var name =  clang_getCString(cStr)
             var type = clang_getCursorType(c)
             if(type.kind == CXTypeKind.CXType_Typedef) {
+                if (aggregateDefs.contains(name)) {
+                    state.inType = false;
+                    break
+                }
+
                 type = clang_getTypedefDeclUnderlyingType(c)
                 if(type.kind == CXTypeKind.CXType_Pointer) {
                     type = clang_getPointeeType(type)
@@ -428,6 +486,10 @@ func main(len: i32, args: **char) : i32 {
 
     macros = Array<Macro> {}
     macros.init()
+
+    aggregateDefs = StrMap<*const char>(
+        null
+    )
 
     var index = clang_createIndex(0, 0);
     var unit = clang_parseTranslationUnit(index, filename, null, 0, null, 0,
